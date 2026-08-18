@@ -36,6 +36,12 @@ class PostCard extends StatelessWidget {
     final totalAttachments = post.allAttachments;
     final previewPath = post.previewImageUrl;
 
+    final headers = {
+      'Referer': '$baseUrl/',
+      'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+    };
+
     String? imageUrl;
     if (previewPath != null) {
       final item = AttachmentItem(path: previewPath);
@@ -80,6 +86,7 @@ class PostCard extends StatelessWidget {
                       backgroundColor: isDark ? const Color(0xFF323642) : const Color(0xFFE0E0E0),
                       backgroundImage: CachedNetworkImageProvider(
                         '$baseUrl/icons/${post.service}/${post.user}',
+                        headers: headers,
                       ),
                       onBackgroundImageError: (_, __) {},
                       child: Text(
@@ -157,10 +164,11 @@ class PostCard extends StatelessWidget {
                 children: [
                   Container(
                     width: double.infinity,
-                    constraints: const BoxConstraints(maxHeight: 280, minHeight: 120),
+                    constraints: const BoxConstraints(maxHeight: 280, minHeight: 140),
                     color: isDark ? const Color(0xFF1B1C22) : const Color(0xFFEEEEEE),
                     child: CachedNetworkImage(
                       imageUrl: imageUrl,
+                      httpHeaders: headers,
                       fit: BoxFit.cover,
                       placeholder: (context, url) => Container(
                         height: 160,
@@ -174,10 +182,10 @@ class PostCard extends StatelessWidget {
                         ),
                       ),
                       errorWidget: (context, url, error) {
-                        // Fallback to original image path
                         final fallbackUrl = AttachmentItem(path: previewPath).getFileUrl(baseUrl);
                         return CachedNetworkImage(
                           imageUrl: fallbackUrl,
+                          httpHeaders: headers,
                           fit: BoxFit.cover,
                           errorWidget: (_, __, ___) => Container(
                             height: 120,
@@ -218,7 +226,7 @@ class PostCard extends StatelessWidget {
               ),
             ],
 
-            // Text excerpt snippet if no image or short note
+            // Text excerpt snippet if no image
             if ((imageUrl == null || imageUrl.isEmpty) && post.content.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.fromLTRB(14, 4, 14, 8),

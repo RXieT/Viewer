@@ -212,6 +212,11 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                         backgroundColor: isDark ? const Color(0xFF323642) : const Color(0xFFE0E0E0),
                         backgroundImage: CachedNetworkImageProvider(
                           '$baseUrl/icons/${_post.service}/${_post.user}',
+                          headers: {
+                            'Referer': '$baseUrl/',
+                            'User-Agent':
+                                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+                          },
                         ),
                         onBackgroundImageError: (_, __) {},
                         child: Text(
@@ -516,6 +521,11 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                         children: [
                           CachedNetworkImage(
                             imageUrl: thumbUrl,
+                            httpHeaders: {
+                              'Referer': '$baseUrl/',
+                              'User-Agent':
+                                  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+                            },
                             fit: BoxFit.cover,
                             width: double.infinity,
                             placeholder: (context, url) => Container(
@@ -532,6 +542,11 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                             errorWidget: (context, url, error) {
                               return CachedNetworkImage(
                                 imageUrl: fullUrl,
+                                httpHeaders: {
+                                  'Referer': '$baseUrl/',
+                                  'User-Agent':
+                                      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+                                },
                                 fit: BoxFit.cover,
                                 width: double.infinity,
                                 errorWidget: (_, __, ___) => Container(

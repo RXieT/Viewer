@@ -85,7 +85,10 @@ class AttachmentItem {
       return path!;
     }
     final cleanPath = path!.startsWith('/') ? path! : '/$path';
-    return '$cleanBase$cleanPath';
+    if (cleanPath.startsWith('/data')) {
+      return '$cleanBase$cleanPath';
+    }
+    return '$cleanBase/data$cleanPath';
   }
 
   String getThumbnailUrl(String baseUrl) {
@@ -95,7 +98,10 @@ class AttachmentItem {
       return path!;
     }
     final cleanPath = path!.startsWith('/') ? path! : '/$path';
-    return '$cleanBase/thumbnail$cleanPath';
+    if (cleanPath.startsWith('/data')) {
+      return '$cleanBase/thumbnail$cleanPath';
+    }
+    return '$cleanBase/thumbnail/data$cleanPath';
   }
 }
 

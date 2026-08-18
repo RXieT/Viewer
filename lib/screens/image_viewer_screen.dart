@@ -62,6 +62,11 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
   Widget build(BuildContext context) {
     final currentItem = widget.images[_currentIndex];
     final currentUrl = currentItem.getFileUrl(widget.baseUrl);
+    final headers = {
+      'Referer': '${widget.baseUrl}/',
+      'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+    };
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -99,7 +104,10 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
           final url = item.getFileUrl(widget.baseUrl);
 
           return PhotoViewGalleryPageOptions(
-            imageProvider: CachedNetworkImageProvider(url),
+            imageProvider: CachedNetworkImageProvider(
+              url,
+              headers: headers,
+            ),
             initialScale: PhotoViewComputedScale.contained,
             minScale: PhotoViewComputedScale.contained * 0.8,
             maxScale: PhotoViewComputedScale.covered * 3.5,

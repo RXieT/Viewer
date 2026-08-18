@@ -28,6 +28,14 @@ class ApiService {
   List<Creator>? _cachedCreators;
   DateTime? _creatorsCacheTime;
 
+  static const Map<String, String> defaultHttpHeaders = {
+    'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+    'Referer': 'https://kemono.cr/',
+    'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+  };
+
   ApiService({String? baseUrl}) {
     if (baseUrl != null && baseUrl.isNotEmpty) {
       setBaseUrl(baseUrl);
@@ -61,14 +69,12 @@ class ApiService {
     }
     _baseUrl = url;
     _setupDio();
-    // Clear creator cache on domain switch
     _cachedCreators = null;
     _creatorsCacheTime = null;
   }
 
   String get baseUrl => _baseUrl;
 
-  /// Helper to safely extract list from any Kemono response format (List, Map with posts/results/data, or JSON String)
   List<dynamic> _extractList(dynamic data) {
     if (data == null) return [];
     if (data is List) return data;
@@ -87,7 +93,7 @@ class ApiService {
     return [];
   }
 
-  /// Test connectivity to the given domain or current base URL
+  /// Test connectivity to the given domain
   Future<ApiResponse<bool>> testConnection([String? testUrl]) async {
     final target = testUrl ?? _baseUrl;
     try {
@@ -104,7 +110,6 @@ class ApiService {
         validateStatus: (s) => s != null && s < 500,
       ));
 
-      // Test /api/v1/posts which is the main public data endpoint
       final response = await dioTest.get('$target/api/v1/posts?o=0');
       if (response.statusCode == 200) {
         return ApiResponse(data: true, statusCode: 200);
@@ -127,16 +132,18 @@ class ApiService {
     }
   }
 
-  /// Get list of all creators (cached for 15 mins to save bandwidth)
+  /// Get list of creators (with automatic fallback to extracting from recent post streams)
   Future<ApiResponse<List<Creator>>> getCreators({bool forceRefresh = false}) async {
     if (!forceRefresh &&
         _cachedCreators != null &&
+        _cachedCreators!.isNotEmpty &&
         _creatorsCacheTime != null &&
         DateTime.now().difference(_creatorsCacheTime!) < const Duration(minutes: 15)) {
       return ApiResponse(data: _cachedCreators);
     }
 
     try {
+      // 1. Try official creators endpoint
       final response = await _dio.get('$_baseUrl/api/v1/creators');
       if (response.statusCode == 200) {
         final List<dynamic> raw = _extractList(response.data);
@@ -144,23 +151,46 @@ class ApiService {
             .whereType<Map<String, dynamic>>()
             .map((item) => Creator.fromJson(item))
             .toList();
-        _cachedCreators = creators;
-        _creatorsCacheTime = DateTime.now();
-        return ApiResponse(data: creators, statusCode: 200);
-      } else if (response.statusCode == 403 || response.statusCode == 503) {
-        return ApiResponse(
-          error: '访问受限，可能需要过验证码',
-          isCloudflareChallenge: true,
-          statusCode: response.statusCode,
-        );
-      } else {
-        return ApiResponse(
-          error: '获取创作者列表失败: HTTP ${response.statusCode}',
-          statusCode: response.statusCode,
-        );
+
+        if (creators.isNotEmpty) {
+          _cachedCreators = creators;
+          _creatorsCacheTime = DateTime.now();
+          return ApiResponse(data: creators, statusCode: 200);
+        }
       }
+    } catch (_) {}
+
+    // 2. Fallback: Automatically extract active creators from recent posts
+    try {
+      final postsRes1 = await _dio.get('$_baseUrl/api/v1/posts?o=0');
+      final List<dynamic> raw1 = _extractList(postsRes1.data);
+      
+      final Map<String, Creator> map = {};
+      for (var item in raw1) {
+        if (item is Map<String, dynamic>) {
+          final user = item['user']?.toString() ?? '';
+          final service = item['service']?.toString() ?? '';
+          final name = item['user_name']?.toString() ?? item['username']?.toString() ?? user;
+          if (user.isNotEmpty && service.isNotEmpty) {
+            final key = '$service:$user';
+            map[key] = Creator(
+              id: user,
+              name: name,
+              service: service,
+            );
+          }
+        }
+      }
+
+      final discovered = map.values.toList();
+      _cachedCreators = discovered;
+      _creatorsCacheTime = DateTime.now();
+      return ApiResponse(data: discovered, statusCode: 200);
     } catch (e) {
-      return ApiResponse(error: '网络请求错误: $e');
+      if (_cachedCreators != null && _cachedCreators!.isNotEmpty) {
+        return ApiResponse(data: _cachedCreators, statusCode: 200);
+      }
+      return ApiResponse(error: '获取创作者失败: $e');
     }
   }
 
@@ -182,7 +212,7 @@ class ApiService {
             .whereType<Map<String, dynamic>>()
             .map((item) => PostItem.fromJson(item))
             .toList();
-        _attachCreatorNames(posts);
+        _recordCreatorsFromPosts(posts);
         return ApiResponse(data: posts, statusCode: 200);
       } else if (response.statusCode == 403 || response.statusCode == 503) {
         return ApiResponse(
@@ -224,7 +254,7 @@ class ApiService {
             .whereType<Map<String, dynamic>>()
             .map((item) => PostItem.fromJson(item))
             .toList();
-        _attachCreatorNames(posts);
+        _recordCreatorsFromPosts(posts);
         return ApiResponse(data: posts, statusCode: 200);
       } else if (response.statusCode == 403 || response.statusCode == 503) {
         return ApiResponse(
@@ -250,7 +280,6 @@ class ApiService {
     String postId,
   ) async {
     try {
-      // First try posts endpoint with post id filter or direct detail
       String path = '$_baseUrl/api/v1/$service/user/$userId/post/$postId';
       var response = await _dio.get(path);
 
@@ -273,7 +302,6 @@ class ApiService {
         }
 
         final post = PostItem.fromJson(data);
-        _attachCreatorNames([post]);
         return ApiResponse(data: post, statusCode: 200);
       } else {
         return ApiResponse(
@@ -308,7 +336,7 @@ class ApiService {
             .whereType<Map<String, dynamic>>()
             .map((item) => PostItem.fromJson(item))
             .toList();
-        _attachCreatorNames(posts);
+        _recordCreatorsFromPosts(posts);
         return ApiResponse(data: posts, statusCode: 200);
       } else {
         return ApiResponse(
@@ -321,12 +349,13 @@ class ApiService {
     }
   }
 
-  /// Search creators in locally cached list (super fast & zero extra traffic)
+  /// Search creators in locally cached list
   Future<List<Creator>> searchLocalCreators(String query, {String? service}) async {
-    if (_cachedCreators == null) {
-      final res = await getCreators();
-      if (!res.isSuccess || res.data == null) return [];
+    if (_cachedCreators == null || _cachedCreators!.isEmpty) {
+      await getCreators();
     }
+
+    if (_cachedCreators == null) return [];
 
     final q = query.trim().toLowerCase();
     return _cachedCreators!.where((c) {
@@ -337,13 +366,20 @@ class ApiService {
     }).toList();
   }
 
-  void _attachCreatorNames(List<PostItem> posts) {
-    if (_cachedCreators == null) return;
-    final map = {for (var c in _cachedCreators!) '${c.service}:${c.id}': c.name};
+  void _recordCreatorsFromPosts(List<PostItem> posts) {
+    _cachedCreators ??= [];
+    final existingKeys = {for (var c in _cachedCreators!) '${c.service}:${c.id}'};
+
     for (var p in posts) {
       final key = '${p.service}:${p.user}';
-      if (map.containsKey(key)) {
-        p.userName = map[key];
+      if (!existingKeys.contains(key) && p.user.isNotEmpty && p.service.isNotEmpty) {
+        final newCreator = Creator(
+          id: p.user,
+          name: p.userName ?? '创作者 ${p.user}',
+          service: p.service,
+        );
+        _cachedCreators!.add(newCreator);
+        existingKeys.add(key);
       }
     }
   }

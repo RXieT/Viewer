@@ -164,7 +164,14 @@ class _CreatorDetailScreenState extends State<CreatorDetailScreen> {
                         CircleAvatar(
                           radius: 30,
                           backgroundColor: isDark ? const Color(0xFF323642) : const Color(0xFFE0E0E0),
-                          backgroundImage: CachedNetworkImageProvider(avatarUrl),
+                          backgroundImage: CachedNetworkImageProvider(
+                            avatarUrl,
+                            headers: {
+                              'Referer': '$baseUrl/',
+                              'User-Agent':
+                                  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+                            },
+                          ),
                           onBackgroundImageError: (_, __) {},
                           child: Text(
                             widget.creator.name.isNotEmpty ? widget.creator.name[0].toUpperCase() : '?',
