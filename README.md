@@ -1,3 +1,5 @@
+VibeCoding，而且穷，用的gemini3.7f，下面是普信ai胡诌的，不要信。
+
 # Kemono Mobile Viewer (Kemono 手机浏览快捷客户端)
 
 一个基于 Flutter 构建的现代化、舒适、非破坏性的 Kemono 手机浏览客户端与快捷方式。
