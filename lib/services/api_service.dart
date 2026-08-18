@@ -194,38 +194,59 @@ class ApiService {
     }
   }
 
-  /// Get recent posts feed
+  /// Get recent posts feed with accurate service filtering
   Future<ApiResponse<List<PostItem>>> getRecentPosts({
     int offset = 0,
     String? service,
   }) async {
     try {
-      String path = '$_baseUrl/api/v1/posts?o=$offset';
-      if (service != null && service.isNotEmpty && service != 'all') {
-        path += '&service=$service';
+      final targetService = (service != null && service.isNotEmpty && service != 'all')
+          ? service.toLowerCase()
+          : null;
+
+      final List<PostItem> resultList = [];
+      int currentOffset = offset;
+      int fetchRounds = 0;
+      final maxRounds = targetService != null ? 5 : 1;
+
+      while (fetchRounds < maxRounds) {
+        fetchRounds++;
+        final String path = '$_baseUrl/api/v1/posts?o=$currentOffset';
+        final response = await _dio.get(path);
+
+        if (response.statusCode == 200) {
+          final List<dynamic> raw = _extractList(response.data);
+          final posts = raw
+              .whereType<Map<String, dynamic>>()
+              .map((item) => PostItem.fromJson(item))
+              .toList();
+
+          _recordCreatorsFromPosts(posts);
+
+          if (targetService != null) {
+            final matched = posts.where((p) => p.service.toLowerCase() == targetService).toList();
+            resultList.addAll(matched);
+            currentOffset += posts.length;
+
+            if (resultList.length >= 20 || posts.length < 25) {
+              break;
+            }
+          } else {
+            resultList.addAll(posts);
+            break;
+          }
+        } else if (response.statusCode == 403 || response.statusCode == 503) {
+          return ApiResponse(
+            error: '受到防护拦截，请尝试切换镜像或使用内置网页',
+            isCloudflareChallenge: true,
+            statusCode: response.statusCode,
+          );
+        } else {
+          break;
+        }
       }
 
-      final response = await _dio.get(path);
-      if (response.statusCode == 200) {
-        final List<dynamic> raw = _extractList(response.data);
-        final posts = raw
-            .whereType<Map<String, dynamic>>()
-            .map((item) => PostItem.fromJson(item))
-            .toList();
-        _recordCreatorsFromPosts(posts);
-        return ApiResponse(data: posts, statusCode: 200);
-      } else if (response.statusCode == 403 || response.statusCode == 503) {
-        return ApiResponse(
-          error: '受到防护拦截，请尝试切换镜像或使用内置网页',
-          isCloudflareChallenge: true,
-          statusCode: response.statusCode,
-        );
-      } else {
-        return ApiResponse(
-          error: '获取帖子列表失败: HTTP ${response.statusCode}',
-          statusCode: response.statusCode,
-        );
-      }
+      return ApiResponse(data: resultList, statusCode: 200);
     } catch (e) {
       return ApiResponse(error: '加载帖子错误: $e');
     }
@@ -238,12 +259,10 @@ class ApiService {
     int offset = 0,
   }) async {
     try {
-      // Primary: query via /api/v1/posts?service=...&user=...
       String path = '$_baseUrl/api/v1/posts?service=$service&user=$userId&o=$offset';
       var response = await _dio.get(path);
 
       if (response.statusCode == 404 || response.statusCode == 403) {
-        // Fallback: /api/v1/{service}/user/{userId}/posts
         path = '$_baseUrl/api/v1/$service/user/$userId/posts?o=$offset';
         response = await _dio.get(path);
       }
@@ -314,7 +333,7 @@ class ApiService {
     }
   }
 
-  /// Search posts by keyword or tag
+  /// Search posts by keyword or tag with service filter
   Future<ApiResponse<List<PostItem>>> searchPosts(
     String query, {
     int offset = 0,
@@ -322,21 +341,28 @@ class ApiService {
     bool isTag = false,
   }) async {
     try {
+      final targetService = (service != null && service.isNotEmpty && service != 'all')
+          ? service.toLowerCase()
+          : null;
+
       String encoded = Uri.encodeComponent(query.trim());
       String param = isTag ? 'tag' : 'q';
       String path = '$_baseUrl/api/v1/posts?$param=$encoded&o=$offset';
-      if (service != null && service.isNotEmpty && service != 'all') {
-        path += '&service=$service';
-      }
 
       final response = await _dio.get(path);
       if (response.statusCode == 200) {
         final List<dynamic> raw = _extractList(response.data);
-        final posts = raw
+        var posts = raw
             .whereType<Map<String, dynamic>>()
             .map((item) => PostItem.fromJson(item))
             .toList();
+
         _recordCreatorsFromPosts(posts);
+
+        if (targetService != null) {
+          posts = posts.where((p) => p.service.toLowerCase() == targetService).toList();
+        }
+
         return ApiResponse(data: posts, statusCode: 200);
       } else {
         return ApiResponse(

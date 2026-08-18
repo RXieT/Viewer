@@ -20,7 +20,7 @@ class _FeedScreenState extends State<FeedScreen> {
   bool _hasMore = true;
   String? _errorMessage;
   bool _isCloudflare = false;
-  int _offset = 0;
+  int _serverOffset = 0;
   String _selectedService = 'all';
 
   final ScrollController _scrollController = ScrollController();
@@ -62,7 +62,7 @@ class _FeedScreenState extends State<FeedScreen> {
   Future<void> _loadPosts({bool isRefresh = false}) async {
     if (_isLoading) return;
     if (isRefresh) {
-      _offset = 0;
+      _serverOffset = 0;
       _hasMore = true;
       _posts.clear();
       _errorMessage = null;
@@ -72,7 +72,7 @@ class _FeedScreenState extends State<FeedScreen> {
 
     final api = context.read<AppProvider>().apiService;
     final res = await api.getRecentPosts(
-      offset: _offset,
+      offset: _serverOffset,
       service: _selectedService == 'all' ? null : _selectedService,
     );
 
@@ -82,8 +82,8 @@ class _FeedScreenState extends State<FeedScreen> {
         if (res.isSuccess && res.data != null) {
           final newPosts = res.data!;
           _posts.addAll(newPosts);
-          _offset += newPosts.length;
-          if (newPosts.length < 25) {
+          _serverOffset += 50;
+          if (newPosts.isEmpty && _posts.isNotEmpty) {
             _hasMore = false;
           }
         } else {
