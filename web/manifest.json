@@ -1,0 +1,11 @@
+{
+  "name": "Kemono 快捷浏览",
+  "short_name": "Kemono",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#121316",
+  "theme_color": "#E58A2B",
+  "description": "A comfortable mobile shortcut and viewer for Kemono.",
+  "orientation": "portrait-primary",
+  "prefer_related_applications": false
+}
