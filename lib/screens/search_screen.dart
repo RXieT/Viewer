@@ -2,14 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/post.dart';
 import '../models/creator.dart';
+import '../models/tag_info.dart';
+import '../services/tag_service.dart';
 import '../providers/app_provider.dart';
 import '../widgets/post_card.dart';
 import '../widgets/creator_card.dart';
 import '../widgets/empty_state.dart';
+import '../widgets/tag_chip.dart';
 import '../theme/app_colors.dart';
+import 'tags_explorer_screen.dart';
 
 class SearchScreen extends StatefulWidget {
-  const SearchScreen({super.key});
+  final String? initialQuery;
+
+  const SearchScreen({super.key, this.initialQuery});
 
   @override
   State<SearchScreen> createState() => _SearchScreenState();
@@ -18,9 +24,11 @@ class SearchScreen extends StatefulWidget {
 class _SearchScreenState extends State<SearchScreen> with SingleTickerProviderStateMixin {
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  final TagService _tagService = TagService();
   
   late TabController _tabController;
   List<String> _searchHistory = [];
+  List<TagInfo> _tagSuggestions = [];
 
   // Post search state
   final List<PostItem> _postResults = [];
@@ -54,6 +62,13 @@ class _SearchScreenState extends State<SearchScreen> with SingleTickerProviderSt
     _tabController = TabController(length: 2, vsync: this);
     _loadHistory();
     _scrollController.addListener(_onScroll);
+
+    if (widget.initialQuery != null && widget.initialQuery!.isNotEmpty) {
+      _searchController.text = widget.initialQuery!;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _performSearch(widget.initialQuery!);
+      });
+    }
   }
 
   @override
@@ -80,9 +95,27 @@ class _SearchScreenState extends State<SearchScreen> with SingleTickerProviderSt
     }
   }
 
+  void _onQueryChanged(String query) {
+    final q = query.trim();
+    if (q.isNotEmpty) {
+      final suggestions = _tagService.searchTags(q, limit: 6);
+      setState(() {
+        _tagSuggestions = suggestions;
+      });
+    } else {
+      setState(() {
+        _tagSuggestions = [];
+      });
+    }
+  }
+
   Future<void> _performSearch(String query) async {
     final q = query.trim();
     if (q.isEmpty) return;
+
+    setState(() {
+      _tagSuggestions = [];
+    });
 
     final storage = context.read<AppProvider>().storageService;
     await storage.addSearchHistory(q);
@@ -161,9 +194,10 @@ class _SearchScreenState extends State<SearchScreen> with SingleTickerProviderSt
           controller: _searchController,
           autofocus: false,
           textInputAction: TextInputAction.search,
+          onChanged: _onQueryChanged,
           onSubmitted: _performSearch,
           decoration: InputDecoration(
-            hintText: '搜索帖子关键词或创作者...',
+            hintText: '搜中英标签/作品/作者 (如 原神 / comic)...',
             border: InputBorder.none,
             enabledBorder: InputBorder.none,
             focusedBorder: InputBorder.none,
@@ -177,12 +211,25 @@ class _SearchScreenState extends State<SearchScreen> with SingleTickerProviderSt
                       setState(() {
                         _postResults.clear();
                         _creatorResults.clear();
+                        _tagSuggestions.clear();
                       });
                     },
                   )
                 : null,
           ),
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.style_outlined),
+            tooltip: 'EhViewer 标签库大全',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const TagsExplorerScreen()),
+              );
+            },
+          ),
+        ],
         bottom: TabBar(
           controller: _tabController,
           indicatorColor: AppColors.primary,
@@ -196,6 +243,35 @@ class _SearchScreenState extends State<SearchScreen> with SingleTickerProviderSt
       ),
       body: Column(
         children: [
+          // Real-time Tag Suggestions Bar when typing
+          if (_tagSuggestions.isNotEmpty)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              color: isDark ? const Color(0xFF1E212B) : const Color(0xFFE8ECF4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('标签联想匹配 (点击即搜)：', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: _tagSuggestions.map((info) {
+                      return TagChip(
+                        rawTag: info.tag,
+                        tagInfo: info,
+                        showBilingual: true,
+                        onTap: () {
+                          _searchController.text = info.tag;
+                          _performSearch(info.tag);
+                        },
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ),
+            ),
+
           // Service filter chips
           Container(
             height: 44,
@@ -248,13 +324,11 @@ class _SearchScreenState extends State<SearchScreen> with SingleTickerProviderSt
 
   Widget _buildPostsTab(String currentDomain, bool isDark) {
     if (_searchController.text.isEmpty && _postResults.isEmpty) {
-      return _buildSearchHistorySection();
+      return _buildSearchHistoryAndPopularTagsSection();
     }
 
     if (_isSearchingPosts && _postResults.isEmpty) {
-      return const Center(
-        child: CircularProgressIndicator(),
-      );
+      return const Center(child: CircularProgressIndicator());
     }
 
     if (_postError != null && _postResults.isEmpty) {
@@ -298,7 +372,7 @@ class _SearchScreenState extends State<SearchScreen> with SingleTickerProviderSt
 
   Widget _buildCreatorsTab(bool isDark) {
     if (_searchController.text.isEmpty && _creatorResults.isEmpty) {
-      return _buildSearchHistorySection();
+      return _buildSearchHistoryAndPopularTagsSection();
     }
 
     if (_isSearchingCreators) {
@@ -322,39 +396,33 @@ class _SearchScreenState extends State<SearchScreen> with SingleTickerProviderSt
     );
   }
 
-  Widget _buildSearchHistorySection() {
-    if (_searchHistory.isEmpty) {
-      return const Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.search_rounded, size: 48, color: Colors.grey),
-            SizedBox(height: 12),
-            Text('输入关键词开始搜索帖子或作者', style: TextStyle(color: Colors.grey)),
-          ],
-        ),
-      );
-    }
+  Widget _buildSearchHistoryAndPopularTagsSection() {
+    final popularTags = _tagService.allTags.take(15).toList();
 
-    return Padding(
+    return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Popular Tags Bar
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
-                '搜索历史',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+              const Row(
+                children: [
+                  Icon(Icons.local_fire_department_rounded, color: Colors.orange, size: 18),
+                  SizedBox(width: 6),
+                  Text('热门标签 (中英对照)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                ],
               ),
               TextButton(
-                onPressed: () async {
-                  final storage = context.read<AppProvider>().storageService;
-                  await storage.clearSearchHistory();
-                  _loadHistory();
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const TagsExplorerScreen()),
+                  );
                 },
-                child: const Text('清空历史', style: TextStyle(fontSize: 12)),
+                child: const Text('查看全部 2000+ 标签 >', style: TextStyle(fontSize: 12)),
               ),
             ],
           ),
@@ -362,17 +430,58 @@ class _SearchScreenState extends State<SearchScreen> with SingleTickerProviderSt
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: _searchHistory.map((query) {
-              return ActionChip(
-                label: Text(query),
-                avatar: const Icon(Icons.history, size: 16),
-                onPressed: () {
-                  _searchController.text = query;
-                  _performSearch(query);
+            children: popularTags.map((tagInfo) {
+              return TagChip(
+                rawTag: tagInfo.tag,
+                tagInfo: tagInfo,
+                showBilingual: true,
+                onTap: () {
+                  _searchController.text = tagInfo.tag;
+                  _performSearch(tagInfo.tag);
                 },
               );
             }).toList(),
           ),
+
+          const SizedBox(height: 24),
+          const Divider(height: 1),
+          const SizedBox(height: 16),
+
+          // Search History Section
+          if (_searchHistory.isNotEmpty) ...[
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  '搜索历史',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                ),
+                TextButton(
+                  onPressed: () async {
+                    final storage = context.read<AppProvider>().storageService;
+                    await storage.clearSearchHistory();
+                    _loadHistory();
+                  },
+                  child: const Text('清空历史', style: TextStyle(fontSize: 12)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _searchHistory.map((query) {
+                return ActionChip(
+                  label: Text(query),
+                  avatar: const Icon(Icons.history, size: 16),
+                  onPressed: () {
+                    _searchController.text = query;
+                    _performSearch(query);
+                  },
+                );
+              }).toList(),
+            ),
+          ],
         ],
       ),
     );

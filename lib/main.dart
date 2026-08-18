@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'providers/app_provider.dart';
 import 'providers/bookmark_provider.dart';
 import 'services/storage_service.dart';
+import 'services/tag_service.dart';
 import 'screens/main_screen.dart';
 import 'theme/app_theme.dart';
 
@@ -11,6 +12,10 @@ void main() async {
 
   final storageService = StorageService();
   await storageService.init();
+
+  // Initialize in-memory EhViewer-style bilingual tag dictionary
+  final tagService = TagService();
+  await tagService.init();
 
   runApp(
     MultiProvider(
