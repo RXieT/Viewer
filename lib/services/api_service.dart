@@ -31,8 +31,9 @@ class ApiService {
   ApiService({String? baseUrl}) {
     if (baseUrl != null && baseUrl.isNotEmpty) {
       setBaseUrl(baseUrl);
+    } else {
+      _setupDio();
     }
-    _setupDio();
   }
 
   void _setupDio() {
@@ -40,9 +41,11 @@ class ApiService {
       connectTimeout: const Duration(seconds: 15),
       receiveTimeout: const Duration(seconds: 20),
       headers: {
-        'Accept': 'application/json',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        'Referer': '$_baseUrl/',
         'User-Agent':
-            'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36 KemonoViewer/1.0',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
       },
       validateStatus: (status) => status != null && status < 500,
     );
@@ -57,7 +60,7 @@ class ApiService {
       url = url.substring(0, url.length - 1);
     }
     _baseUrl = url;
-    _dio.options.baseUrl = _baseUrl;
+    _setupDio();
     // Clear creator cache on domain switch
     _cachedCreators = null;
     _creatorsCacheTime = null;
@@ -65,23 +68,50 @@ class ApiService {
 
   String get baseUrl => _baseUrl;
 
+  /// Helper to safely extract list from any Kemono response format (List, Map with posts/results/data, or JSON String)
+  List<dynamic> _extractList(dynamic data) {
+    if (data == null) return [];
+    if (data is List) return data;
+    if (data is Map) {
+      if (data['posts'] is List) return data['posts'] as List<dynamic>;
+      if (data['results'] is List) return data['results'] as List<dynamic>;
+      if (data['data'] is List) return data['data'] as List<dynamic>;
+      if (data['creators'] is List) return data['creators'] as List<dynamic>;
+    }
+    if (data is String) {
+      try {
+        final decoded = jsonDecode(data);
+        return _extractList(decoded);
+      } catch (_) {}
+    }
+    return [];
+  }
+
   /// Test connectivity to the given domain or current base URL
   Future<ApiResponse<bool>> testConnection([String? testUrl]) async {
     final target = testUrl ?? _baseUrl;
     try {
       final dioTest = Dio(BaseOptions(
-        connectTimeout: const Duration(seconds: 10),
-        receiveTimeout: const Duration(seconds: 10),
-        headers: _dio.options.headers,
+        connectTimeout: const Duration(seconds: 12),
+        receiveTimeout: const Duration(seconds: 12),
+        headers: {
+          'Accept': 'application/json, text/plain, */*',
+          'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+          'Referer': '$target/',
+          'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        },
+        validateStatus: (s) => s != null && s < 500,
       ));
-      
-      final response = await dioTest.get('$target/api/v1/creators');
+
+      // Test /api/v1/posts which is the main public data endpoint
+      final response = await dioTest.get('$target/api/v1/posts?o=0');
       if (response.statusCode == 200) {
         return ApiResponse(data: true, statusCode: 200);
       } else if (response.statusCode == 403 || response.statusCode == 503) {
         return ApiResponse(
           data: false,
-          error: '触发 Cloudflare 防护或受限 (${response.statusCode})',
+          error: '触发防护拦截或需要验证 (${response.statusCode})',
           isCloudflareChallenge: true,
           statusCode: response.statusCode,
         );
@@ -109,11 +139,11 @@ class ApiService {
     try {
       final response = await _dio.get('$_baseUrl/api/v1/creators');
       if (response.statusCode == 200) {
-        final List<dynamic> raw = (response.data is String)
-            ? jsonDecode(response.data as String)
-            : response.data;
-
-        final creators = raw.map((item) => Creator.fromJson(item as Map<String, dynamic>)).toList();
+        final List<dynamic> raw = _extractList(response.data);
+        final creators = raw
+            .whereType<Map<String, dynamic>>()
+            .map((item) => Creator.fromJson(item))
+            .toList();
         _cachedCreators = creators;
         _creatorsCacheTime = DateTime.now();
         return ApiResponse(data: creators, statusCode: 200);
@@ -147,11 +177,11 @@ class ApiService {
 
       final response = await _dio.get(path);
       if (response.statusCode == 200) {
-        final List<dynamic> raw = (response.data is String)
-            ? jsonDecode(response.data as String)
-            : response.data;
-
-        final posts = raw.map((item) => PostItem.fromJson(item as Map<String, dynamic>)).toList();
+        final List<dynamic> raw = _extractList(response.data);
+        final posts = raw
+            .whereType<Map<String, dynamic>>()
+            .map((item) => PostItem.fromJson(item))
+            .toList();
         _attachCreatorNames(posts);
         return ApiResponse(data: posts, statusCode: 200);
       } else if (response.statusCode == 403 || response.statusCode == 503) {
@@ -178,22 +208,22 @@ class ApiService {
     int offset = 0,
   }) async {
     try {
-      // Endpoint format: /api/v1/{service}/user/{userId}/posts?o={offset} or /api/v1/{service}/user/{userId}?o={offset}
-      String path = '$_baseUrl/api/v1/$service/user/$userId/posts?o=$offset';
+      // Primary: query via /api/v1/posts?service=...&user=...
+      String path = '$_baseUrl/api/v1/posts?service=$service&user=$userId&o=$offset';
       var response = await _dio.get(path);
 
-      if (response.statusCode == 404) {
-        // Fallback to legacy endpoint if /posts is not supported
-        path = '$_baseUrl/api/v1/$service/user/$userId?o=$offset';
+      if (response.statusCode == 404 || response.statusCode == 403) {
+        // Fallback: /api/v1/{service}/user/{userId}/posts
+        path = '$_baseUrl/api/v1/$service/user/$userId/posts?o=$offset';
         response = await _dio.get(path);
       }
 
       if (response.statusCode == 200) {
-        final List<dynamic> raw = (response.data is String)
-            ? jsonDecode(response.data as String)
-            : response.data;
-
-        final posts = raw.map((item) => PostItem.fromJson(item as Map<String, dynamic>)).toList();
+        final List<dynamic> raw = _extractList(response.data);
+        final posts = raw
+            .whereType<Map<String, dynamic>>()
+            .map((item) => PostItem.fromJson(item))
+            .toList();
         _attachCreatorNames(posts);
         return ApiResponse(data: posts, statusCode: 200);
       } else if (response.statusCode == 403 || response.statusCode == 503) {
@@ -220,19 +250,25 @@ class ApiService {
     String postId,
   ) async {
     try {
-      final path = '$_baseUrl/api/v1/$service/user/$userId/post/$postId';
-      final response = await _dio.get(path);
+      // First try posts endpoint with post id filter or direct detail
+      String path = '$_baseUrl/api/v1/$service/user/$userId/post/$postId';
+      var response = await _dio.get(path);
+
+      if (response.statusCode == 404 || response.statusCode == 403) {
+        path = '$_baseUrl/api/v1/posts?service=$service&user=$userId&id=$postId';
+        response = await _dio.get(path);
+      }
 
       if (response.statusCode == 200) {
-        Map<String, dynamic> data;
-        if (response.data is List && (response.data as List).isNotEmpty) {
-          data = (response.data as List).first as Map<String, dynamic>;
+        Map<String, dynamic>? data;
+        final rawList = _extractList(response.data);
+        if (rawList.isNotEmpty && rawList.first is Map<String, dynamic>) {
+          data = rawList.first as Map<String, dynamic>;
         } else if (response.data is Map<String, dynamic>) {
           data = response.data as Map<String, dynamic>;
-        } else if (response.data is String) {
-          final decoded = jsonDecode(response.data as String);
-          data = (decoded is List) ? decoded.first : decoded;
-        } else {
+        }
+
+        if (data == null) {
           return ApiResponse(error: '数据格式解析异常');
         }
 
@@ -250,26 +286,28 @@ class ApiService {
     }
   }
 
-  /// Search posts by keyword
+  /// Search posts by keyword or tag
   Future<ApiResponse<List<PostItem>>> searchPosts(
     String query, {
     int offset = 0,
     String? service,
+    bool isTag = false,
   }) async {
     try {
       String encoded = Uri.encodeComponent(query.trim());
-      String path = '$_baseUrl/api/v1/posts?q=$encoded&o=$offset';
+      String param = isTag ? 'tag' : 'q';
+      String path = '$_baseUrl/api/v1/posts?$param=$encoded&o=$offset';
       if (service != null && service.isNotEmpty && service != 'all') {
         path += '&service=$service';
       }
 
       final response = await _dio.get(path);
       if (response.statusCode == 200) {
-        final List<dynamic> raw = (response.data is String)
-            ? jsonDecode(response.data as String)
-            : response.data;
-
-        final posts = raw.map((item) => PostItem.fromJson(item as Map<String, dynamic>)).toList();
+        final List<dynamic> raw = _extractList(response.data);
+        final posts = raw
+            .whereType<Map<String, dynamic>>()
+            .map((item) => PostItem.fromJson(item))
+            .toList();
         _attachCreatorNames(posts);
         return ApiResponse(data: posts, statusCode: 200);
       } else {

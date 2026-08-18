@@ -110,6 +110,7 @@ class PostItem {
   final String? edited;
   final AttachmentItem? file;
   final List<AttachmentItem> attachments;
+  final List<String> tags;
   final Map<String, dynamic>? embed;
   
   String? userName;
@@ -125,11 +126,23 @@ class PostItem {
     this.edited,
     this.file,
     this.attachments = const [],
+    this.tags = const [],
     this.embed,
     this.userName,
   });
 
-  factory PostItem.fromJson(Map<String, dynamic> json) {
+  factory PostItem.fromJson(dynamic rawJson) {
+    if (rawJson is! Map<String, dynamic>) {
+      return PostItem(
+        id: '',
+        user: '',
+        service: '',
+        title: '无标题',
+        content: '',
+      );
+    }
+
+    final json = rawJson;
     AttachmentItem? mainFile;
     if (json['file'] != null && json['file'] is Map) {
       mainFile = AttachmentItem.fromJson(json['file']);
@@ -145,6 +158,14 @@ class PostItem {
       }
     }
 
+    final rawTags = json['tags'];
+    List<String> parsedTags = [];
+    if (rawTags is List) {
+      parsedTags = rawTags.map((t) => t.toString()).toList();
+    } else if (rawTags is String && rawTags.isNotEmpty) {
+      parsedTags = rawTags.split(',').map((t) => t.trim()).where((t) => t.isNotEmpty).toList();
+    }
+
     return PostItem(
       id: json['id']?.toString() ?? '',
       user: json['user']?.toString() ?? '',
@@ -156,6 +177,7 @@ class PostItem {
       edited: json['edited']?.toString(),
       file: mainFile,
       attachments: parsedAttachments,
+      tags: parsedTags,
       embed: (json['embed'] is Map<String, dynamic>) ? json['embed'] : null,
       userName: json['user_name']?.toString() ?? json['username']?.toString(),
     );
@@ -173,6 +195,7 @@ class PostItem {
       'edited': edited,
       'file': file?.toJson(),
       'attachments': attachments.map((a) => a.toJson()).toList(),
+      'tags': tags,
       'embed': embed,
       'user_name': userName,
     };
